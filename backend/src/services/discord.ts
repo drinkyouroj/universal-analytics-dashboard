@@ -8,6 +8,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers, // Added for roles
   ],
 });
 
@@ -68,7 +69,8 @@ export const getChannelMessages = async (channelId: string, limit = 50) => {
       author: {
         id: m.author.id,
         username: m.author.username,
-        bot: m.author.bot
+        bot: m.author.bot,
+        roles: m.member?.roles.cache.map(r => r.name) || [] // Extract role names
       },
       timestamp: m.createdTimestamp,
       reactions: m.reactions.cache.size,
@@ -78,4 +80,3 @@ export const getChannelMessages = async (channelId: string, limit = 50) => {
     throw error;
   }
 };
-

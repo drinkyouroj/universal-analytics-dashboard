@@ -36,3 +36,5 @@ export const saveAnalysis = async (text: string, score: number, comparative: num
   }
 };
 
+
+

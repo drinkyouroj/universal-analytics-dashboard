@@ -7,6 +7,7 @@ A full-stack application for real-time sentiment analysis and Discord server ana
 - **Universal Content Analytics**: Paste any text to get instant sentiment, emotion, and readability analysis.
 - **Discord Integration**: Connect your Discord server to analyze channel messages, user engagement, and sentiment trends.
 - **Modern UI**: Built with React, Tailwind CSS, and Recharts for beautiful visualizations.
+- **Filtering**: Filter Discord statistics by User and Role.
 
 ## Tech Stack
 
@@ -32,19 +33,24 @@ A full-stack application for real-time sentiment analysis and Discord server ana
 
 2. Create a `.env` file in `backend` with the following credentials:
    ```env
-   PORT=3001
+   PORT=3002
    FRONTEND_URL=http://localhost:5173
    
    # Discord Configuration
    DISCORD_CLIENT_ID=your_discord_client_id
    DISCORD_CLIENT_SECRET=your_discord_client_secret
-   DISCORD_REDIRECT_URI=http://localhost:3001/api/auth/discord/callback
+   DISCORD_REDIRECT_URI=http://localhost:3002/api/auth/discord/callback
    DISCORD_BOT_TOKEN=your_discord_bot_token
    ```
 
-   > **Note**: To get Discord credentials, create an app at [Discord Developer Portal](https://discord.com/developers/applications). 
-   > - Enable "Message Content Intent" for the Bot.
-   > - Add `http://localhost:3001/api/auth/discord/callback` to Redirects.
+   > **CRITICAL**: To get Discord credentials, create an app at [Discord Developer Portal](https://discord.com/developers/applications). 
+   > 1. **Bot Tab**:
+   >    - Enable **Message Content Intent**.
+   >    - Enable **Server Members Intent** (Required for Role filtering).
+   >    - Reset Token to get `DISCORD_BOT_TOKEN`.
+   > 2. **OAuth2 Tab**:
+   >    - Add Redirect: `http://localhost:3002/api/auth/discord/callback`
+   >    - Copy `Client ID` and `Client Secret`.
 
 3. Start the server:
    ```bash
@@ -59,17 +65,12 @@ A full-stack application for real-time sentiment analysis and Discord server ana
    npm install
    ```
 
-2. Create a `.env` file in `frontend` (optional if defaults work):
-   ```env
-   VITE_API_URL=http://localhost:3001/api
-   ```
-
-3. Start the development server:
+2. Start the development server:
    ```bash
    npm run dev
    ```
 
-4. Open [http://localhost:5173](http://localhost:5173) in your browser.
+3. Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ## Usage
 
@@ -78,7 +79,13 @@ A full-stack application for real-time sentiment analysis and Discord server ana
    - Click "Connect Discord Server".
    - Authorize the application.
    - Select a Server and a Channel to view analysis.
-   - **Note**: The Bot must be in the server to read messages. The OAuth flow attempts to add the bot, but you might need to ensure it has "Read Messages" and "Read Message History" permissions.
+   - Use the **User** and **Role** dropdowns to filter the statistics.
+
+## Troubleshooting
+
+- **Connection Error**: Ensure Backend is running on port 3002.
+- **Discord Error**: Ensure the Bot is invited to the server and has "Read Messages" and "View Channel" permissions.
+- **Missing Roles**: Ensure "Server Members Intent" is enabled in the Discord Developer Portal.
 
 ## Project Structure
 
@@ -88,4 +95,3 @@ A full-stack application for real-time sentiment analysis and Discord server ana
 ## License
 
 MIT
-

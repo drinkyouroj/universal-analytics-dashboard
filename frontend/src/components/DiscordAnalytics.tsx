@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { MessageSquare, Hash, ChevronRight, Loader2, BarChart2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { MessageSquare, Hash, ChevronRight, Loader2, BarChart2, Filter, Users } from 'lucide-react';
 import { api } from '../lib/api';
 import type { AnalysisResult } from '../types';
 import { AnalysisDashboard } from './AnalysisDashboard';
@@ -16,18 +16,25 @@ interface Channel {
   type: number;
 }
 
+interface MessageAuthor {
+  username: string;
+  roles: string[];
+}
+
+interface Message {
+  id: string;
+  content: string;
+  author: MessageAuthor;
+  timestamp: number;
+  analysis: AnalysisResult;
+}
+
 interface ChannelAnalysis {
   channelId: string;
   messageCount: number;
   averageSentiment: number;
   topUsers: { username: string; count: number }[];
-  messages: {
-    id: string;
-    content: string;
-    author: { username: string };
-    timestamp: number;
-    analysis: AnalysisResult;
-  }[];
+  messages: Message[];
 }
 
 export const DiscordAnalytics = () => {
@@ -42,6 +49,10 @@ export const DiscordAnalytics = () => {
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState('');
+
+  // Filtering State
+  const [selectedUser, setSelectedUser] = useState<string>('all');
+  const [selectedRole, setSelectedRole] = useState<string>('all');
 
   useEffect(() => {
     const t = localStorage.getItem('discord_token');
@@ -61,7 +72,6 @@ export const DiscordAnalytics = () => {
     } catch (err) {
       console.error(err);
       setError('Failed to fetch servers. Your session may have expired.');
-      // localStorage.removeItem('discord_token'); // Optional: logout on error
     } finally {
       setLoadingGuilds(false);
     }
@@ -72,6 +82,8 @@ export const DiscordAnalytics = () => {
     setSelectedChannel(null);
     setAnalysis(null);
     setLoadingChannels(true);
+    setSelectedUser('all');
+    setSelectedRole('all');
     try {
       const response = await api.get<Channel[]>(`/discord/guilds/${guild.id}/channels`);
       setChannels(response.data);
@@ -86,6 +98,8 @@ export const DiscordAnalytics = () => {
   const handleChannelSelect = async (channel: Channel) => {
     setSelectedChannel(channel);
     setAnalyzing(true);
+    setSelectedUser('all');
+    setSelectedRole('all');
     try {
       const response = await api.get<ChannelAnalysis>(`/discord/channels/${channel.id}/analyze`);
       setAnalysis(response.data);
@@ -96,6 +110,95 @@ export const DiscordAnalytics = () => {
       setAnalyzing(false);
     }
   };
+
+  // Filter Logic
+  const filteredData = useMemo(() => {
+    if (!analysis) return null;
+
+    let messages = analysis.messages;
+
+    if (selectedUser !== 'all') {
+      messages = messages.filter(m => m.author.username === selectedUser);
+    }
+
+    if (selectedRole !== 'all') {
+      messages = messages.filter(m => m.author.roles.includes(selectedRole));
+    }
+
+    const messageCount = messages.length;
+    const totalSentiment = messages.reduce((acc, m) => acc + m.analysis.sentiment.score, 0);
+    const averageSentiment = messageCount > 0 ? totalSentiment / messageCount : 0;
+
+    // Recalculate top users for the filtered set
+    const userActivity: Record<string, number> = {};
+    messages.forEach(m => {
+        userActivity[m.author.username] = (userActivity[m.author.username] || 0) + 1;
+    });
+
+    const topUsers = Object.entries(userActivity)
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 5)
+      .map(([username, count]) => ({ username, count }));
+
+    // Aggregate emotions
+    const aggregatedEmotions = messages.reduce((acc, m) => {
+       acc.joy += m.analysis.emotions.joy;
+       acc.sadness += m.analysis.emotions.sadness;
+       acc.anger += m.analysis.emotions.anger;
+       acc.fear += m.analysis.emotions.fear;
+       acc.neutral += m.analysis.emotions.neutral;
+       return acc;
+     }, { joy: 0, sadness: 0, anger: 0, fear: 0, neutral: 0 });
+
+    // Normalize emotions if there are messages
+    if (messageCount > 0) {
+        aggregatedEmotions.joy = Math.round(aggregatedEmotions.joy / messageCount);
+        aggregatedEmotions.sadness = Math.round(aggregatedEmotions.sadness / messageCount);
+        aggregatedEmotions.anger = Math.round(aggregatedEmotions.anger / messageCount);
+        aggregatedEmotions.fear = Math.round(aggregatedEmotions.fear / messageCount);
+        aggregatedEmotions.neutral = Math.round(aggregatedEmotions.neutral / messageCount);
+    }
+
+    // Extract unique keywords (simple aggregation by score)
+    const keywordMap = new Map<string, number>();
+    messages.forEach(m => {
+        m.analysis.keywords.forEach(k => {
+            const current = keywordMap.get(k.word) || 0;
+            keywordMap.set(k.word, Math.max(current, k.score)); // Take max score or sum? Max seems safer for now.
+        });
+    });
+    const aggregatedKeywords = Array.from(keywordMap.entries())
+        .map(([word, score]) => ({ word, score }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20);
+
+    return {
+        messageCount,
+        averageSentiment,
+        topUsers,
+        messages,
+        aggregatedEmotions,
+        aggregatedKeywords
+    };
+  }, [analysis, selectedUser, selectedRole]);
+
+  // Extract Lists for Dropdowns
+  const { uniqueUsers, uniqueRoles } = useMemo(() => {
+      if (!analysis) return { uniqueUsers: [], uniqueRoles: [] };
+      
+      const users = new Set<string>();
+      const roles = new Set<string>();
+      
+      analysis.messages.forEach(m => {
+          users.add(m.author.username);
+          m.author.roles.forEach(r => roles.add(r));
+      });
+
+      return {
+          uniqueUsers: Array.from(users).sort(),
+          uniqueRoles: Array.from(roles).sort().filter(r => r !== '@everyone') // Filter @everyone if desired
+      };
+  }, [analysis]);
 
   if (!token) {
     return (
@@ -108,7 +211,7 @@ export const DiscordAnalytics = () => {
           Connect your Discord server to unlock community insights, sentiment tracking, and engagement metrics.
         </p>
         <a 
-          href="http://localhost:3002/api/auth/discord"
+          href="/api/auth/discord"
           className="mt-4 inline-flex items-center justify-center whitespace-nowrap rounded-md bg-[#5865F2] px-6 py-3 text-sm font-medium text-white shadow-lg hover:bg-[#4752C4] transition-all hover:scale-105"
         >
           Connect Discord Server
@@ -226,27 +329,55 @@ export const DiscordAnalytics = () => {
                <Loader2 className="animate-spin h-8 w-8 text-primary mb-2" />
                <span className="text-sm text-muted-foreground">Analyzing message history...</span>
              </div>
-          ) : analysis ? (
-            <div className="space-y-4">
+          ) : filteredData ? (
+            <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
+              
+              {/* Filters */}
+              <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground flex items-center gap-1"><Users className="h-3 w-3"/> User</label>
+                      <select 
+                        className="w-full text-xs bg-background border rounded-md p-1.5"
+                        value={selectedUser}
+                        onChange={(e) => setSelectedUser(e.target.value)}
+                      >
+                          <option value="all">All Users</option>
+                          {uniqueUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                  </div>
+                  <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground flex items-center gap-1"><Filter className="h-3 w-3"/> Role</label>
+                      <select 
+                        className="w-full text-xs bg-background border rounded-md p-1.5"
+                        value={selectedRole}
+                        onChange={(e) => setSelectedRole(e.target.value)}
+                      >
+                          <option value="all">All Roles</option>
+                          {uniqueRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                  </div>
+              </div>
+
               <div className="p-4 bg-card border rounded-lg shadow-sm">
-                <div className="text-sm text-muted-foreground">Messages Analyzed</div>
-                <div className="text-2xl font-bold">{analysis.messageCount}</div>
+                <div className="text-sm text-muted-foreground">Messages (Filtered)</div>
+                <div className="text-2xl font-bold">{filteredData.messageCount}</div>
               </div>
               <div className="p-4 bg-card border rounded-lg shadow-sm">
                 <div className="text-sm text-muted-foreground">Average Sentiment</div>
-                <div className={`text-2xl font-bold ${analysis.averageSentiment > 0 ? 'text-green-500' : analysis.averageSentiment < 0 ? 'text-red-500' : 'text-gray-500'}`}>
-                  {analysis.averageSentiment.toFixed(2)}
+                <div className={`text-2xl font-bold ${filteredData.averageSentiment > 0 ? 'text-green-500' : filteredData.averageSentiment < 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                  {filteredData.averageSentiment.toFixed(2)}
                 </div>
               </div>
               <div className="p-4 bg-card border rounded-lg shadow-sm">
                 <div className="text-sm text-muted-foreground mb-2">Top Contributors</div>
                 <div className="space-y-2">
-                  {analysis.topUsers.map((user, i) => (
+                  {filteredData.topUsers.map((user, i) => (
                     <div key={i} className="flex justify-between text-sm">
                       <span>{user.username}</span>
                       <span className="font-mono text-muted-foreground">{user.count}</span>
                     </div>
                   ))}
+                  {filteredData.topUsers.length === 0 && <div className="text-xs text-muted-foreground">No activity found</div>}
                 </div>
               </div>
             </div>
@@ -255,38 +386,22 @@ export const DiscordAnalytics = () => {
       </div>
       
       {/* Detailed Dashboard */}
-      {analysis && (
+      {filteredData && filteredData.messageCount > 0 && (
         <div className="pt-8 border-t">
            <h3 className="text-lg font-semibold mb-6">Detailed Channel Analysis</h3>
-           {/* We aggregate emotions from all messages to show a summary */}
            <AnalysisDashboard data={{
              sentiment: {
-               score: analysis.averageSentiment,
+               score: filteredData.averageSentiment,
                comparative: 0,
                tokens: [],
                words: [],
                positive: [],
                negative: []
              },
-             // Aggregate keywords from messages? Or just use a placeholder/latest message?
-             // For MVP, we passed simple analysis. The dashboard expects full AnalysisResult.
-             // We can construct an aggregate result or just show the result of the combined text if we did that on backend.
-             // Our backend currently returns `messages: { analysis: ... }`.
-             // Let's aggregate emotions.
-             emotions: analysis.messages.reduce((acc, m) => {
-               acc.joy += m.analysis.emotions.joy;
-               acc.sadness += m.analysis.emotions.sadness;
-               acc.anger += m.analysis.emotions.anger;
-               acc.fear += m.analysis.emotions.fear;
-               acc.neutral += m.analysis.emotions.neutral;
-               return acc;
-             }, { joy: 0, sadness: 0, anger: 0, fear: 0, neutral: 0 }),
-             
-             keywords: [], // Todo: Aggregate keywords
+             emotions: filteredData.aggregatedEmotions,
+             keywords: filteredData.aggregatedKeywords, 
              readability: { wordCount: 0, sentenceCount: 0, syllableCount: 0, fleschKincaid: 0 }
            }} />
-           
-           {/* Normalize aggregated emotions for display (avg) */}
         </div>
       )}
     </div>
